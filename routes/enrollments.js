@@ -8,7 +8,7 @@ const router = express.Router();
 router.get("/me", studentAuth, async (req, res) => {
   const student = await Student.findById(req.student.id).populate("enrolledCourses");
   if (!student) return res.status(404).json({ error: "Student not found" });
-  res.json({ id: student._id, name: student.name, email: student.email, enrolledCourses: student.enrolledCourses });
+  res.json({ id: student._id, name: student.name, studentId: student.studentId, email: student.email, enrolledCourses: student.enrolledCourses });
 });
 
 // Enroll in a course

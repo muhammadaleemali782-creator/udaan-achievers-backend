@@ -17,7 +17,29 @@ router.post("/admin/login", (req, res) => {
   res.json({ token });
 });
 
-// ---- Student signup ----
+// ---- Student quick access: enter a Student ID (+ name the first time) ----
+// No password needed. If the ID already exists, it just logs them in.
+// If it's new, it creates the student record with that ID.
+router.post("/student/access", async (req, res) => {
+  try {
+    const { studentId, name } = req.body;
+    if (!studentId) return res.status(400).json({ error: "Student ID is required" });
+
+    let student = await Student.findOne({ studentId: studentId.trim() });
+
+    if (!student) {
+      if (!name) return res.status(400).json({ error: "Name is required for a new Student ID" });
+      student = await Student.create({ studentId: studentId.trim(), name });
+    }
+
+    const token = jwt.sign({ role: "student", id: student._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
+    res.json({ token, student: { id: student._id, name: student.name, studentId: student.studentId } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- Student signup (email + password, optional alternate flow) ----
 router.post("/student/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
