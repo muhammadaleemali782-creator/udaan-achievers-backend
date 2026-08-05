@@ -1,10 +1,12 @@
 import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
 import { connectDB } from "./config/db.js";
 import Course from "./models/Course.js";
 import Batch from "./models/Batch.js";
 import Testimonial from "./models/Testimonial.js";
 import Stat from "./models/Stat.js";
 import SiteInfo from "./models/SiteInfo.js";
+import Student from "./models/Student.js";
 import mongoose from "mongoose";
 
 dotenv.config();
@@ -61,6 +63,22 @@ async function run() {
   await Testimonial.insertMany(testimonials);
   await Stat.insertMany(stats);
   await SiteInfo.findOneAndUpdate({ key: "contact" }, { key: "contact" }, { upsert: true });
+
+  // Create the one admin account if it doesn't already exist
+  const existingAdmin = await Student.findOne({ studentId: process.env.ADMIN_USERNAME });
+  if (!existingAdmin) {
+    const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 10);
+    await Student.create({
+      studentId: process.env.ADMIN_USERNAME,
+      passwordHash,
+      email: process.env.ADMIN_EMAIL,
+      name: "Admin",
+      role: "admin",
+    });
+    console.log(`Admin account created — ID: ${process.env.ADMIN_USERNAME}`);
+  } else {
+    console.log("Admin account already exists, skipped.");
+  }
 
   console.log("Database seeded successfully");
   mongoose.connection.close();

@@ -3,9 +3,12 @@ import mongoose from "mongoose";
 const studentSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
-    studentId: { type: String, required: true, unique: true }, // simple ID the student picks/remembers, e.g. phone number or roll number
-    email: { type: String, unique: true, sparse: true },
-    passwordHash: { type: String },
+    studentId: { type: String, required: true, unique: true }, // the ID the user logs in with
+    email: { type: String, required: true },
+    passwordHash: { type: String, required: true },
+    role: { type: String, enum: ["student", "admin"], default: "student" },
+    resetToken: { type: String },
+    resetTokenExpiry: { type: Date },
     enrolledCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: "Course" }],
   },
   { timestamps: true }

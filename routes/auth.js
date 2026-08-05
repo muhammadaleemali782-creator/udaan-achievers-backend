@@ -1,75 +1,98 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import Student from "../models/Student.js";
+import { sendPasswordResetEmail } from "../utils/email.js";
 
 const router = express.Router();
 
-// ---- Admin login (credentials from .env, no DB user needed) ----
-router.post("/admin/login", (req, res) => {
-  const { username, password } = req.body;
-
-  if (username !== process.env.ADMIN_USERNAME || password !== process.env.ADMIN_PASSWORD) {
-    return res.status(401).json({ error: "Invalid admin credentials" });
-  }
-
-  const token = jwt.sign({ role: "admin", username }, process.env.JWT_SECRET, { expiresIn: "7d" });
-  res.json({ token });
-});
-
-// ---- Student quick access: enter a Student ID (+ name the first time) ----
-// No password needed. If the ID already exists, it just logs them in.
-// If it's new, it creates the student record with that ID.
-router.post("/student/access", async (req, res) => {
+// ---- Sign up: anyone can create a new ID + password. Always creates a
+// regular "student" account — admin accounts are only made via the seed
+// script, never through public signup. ----
+router.post("/signup", async (req, res) => {
   try {
-    const { studentId, name } = req.body;
-    if (!studentId) return res.status(400).json({ error: "Student ID is required" });
-
-    let student = await Student.findOne({ studentId: studentId.trim() });
-
-    if (!student) {
-      if (!name) return res.status(400).json({ error: "Name is required for a new Student ID" });
-      student = await Student.create({ studentId: studentId.trim(), name });
+    const { studentId, password, email, name } = req.body;
+    if (!studentId || !password || !email || !name) {
+      return res.status(400).json({ error: "ID, password, email aur naam sab zaroori hain" });
     }
 
-    const token = jwt.sign({ role: "student", id: student._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
-    res.json({ token, student: { id: student._id, name: student.name, studentId: student.studentId } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---- Student signup (email + password, optional alternate flow) ----
-router.post("/student/signup", async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: "Missing fields" });
-
-    const existing = await Student.findOne({ email });
-    if (existing) return res.status(409).json({ error: "Email already registered" });
+    const existing = await Student.findOne({ studentId: studentId.trim() });
+    if (existing) return res.status(409).json({ error: "Ye ID pehle se use ho rahi hai" });
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const student = await Student.create({ name, email, passwordHash });
+    const user = await Student.create({
+      studentId: studentId.trim(),
+      passwordHash,
+      email: email.trim().toLowerCase(),
+      name: name.trim(),
+      role: "student",
+    });
 
-    const token = jwt.sign({ role: "student", id: student._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-    res.status(201).json({ token, student: { id: student._id, name: student.name, email: student.email } });
+    const token = jwt.sign({ role: user.role, id: user._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
+    res.status(201).json({ role: user.role, token, user: { id: user._id, name: user.name, studentId: user.studentId } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---- Student login ----
-router.post("/student/login", async (req, res) => {
+// ---- Log in with ID + password. Works for both students and admin —
+// the account's role (set in the database) decides what they see. ----
+router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const student = await Student.findOne({ email });
-    if (!student) return res.status(401).json({ error: "Invalid credentials" });
+    const { studentId, password } = req.body;
+    if (!studentId || !password) return res.status(400).json({ error: "ID aur password dono daalo" });
 
-    const ok = await bcrypt.compare(password, student.passwordHash);
-    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+    const user = await Student.findOne({ studentId: studentId.trim() });
+    if (!user) return res.status(401).json({ error: "Galat ID ya password" });
 
-    const token = jwt.sign({ role: "student", id: student._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
-    res.json({ token, student: { id: student._id, name: student.name, email: student.email } });
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: "Galat ID ya password" });
+
+    const token = jwt.sign({ role: user.role, id: user._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
+    res.json({ role: user.role, token, user: { id: user._id, name: user.name, studentId: user.studentId } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- Forgot password: send a reset link to the account's email ----
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email daalo" });
+
+    const user = await Student.findOne({ email: email.trim().toLowerCase() });
+    // Always respond success even if not found, so people can't probe which emails exist.
+    if (!user) return res.json({ success: true });
+
+    const token = crypto.randomBytes(32).toString("hex");
+    user.resetToken = token;
+    user.resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save();
+
+    await sendPasswordResetEmail(user.email, token);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Email bhejne me dikkat hui, thodi der baad try karo" });
+  }
+});
+
+// ---- Reset password using the token from the emailed link ----
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) return res.status(400).json({ error: "Token aur naya password zaroori hai" });
+
+    const user = await Student.findOne({ resetToken: token, resetTokenExpiry: { $gt: new Date() } });
+    if (!user) return res.status(400).json({ error: "Link expire ho gaya hai ya galat hai, dubara try karo" });
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.resetToken = undefined;
+    user.resetTokenExpiry = undefined;
+    await user.save();
+
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
