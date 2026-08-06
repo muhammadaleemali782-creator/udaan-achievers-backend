@@ -9,6 +9,7 @@ import batchRoutes from "./routes/batches.js";
 import testimonialRoutes from "./routes/testimonials.js";
 import statRoutes from "./routes/stats.js";
 import siteInfoRoutes from "./routes/siteInfo.js";
+import bannerRoutes from "./routes/banners.js";
 import enrollmentRoutes from "./routes/enrollments.js";
 
 dotenv.config();
@@ -27,6 +28,7 @@ app.use("/api/batches", batchRoutes);
 app.use("/api/testimonials", testimonialRoutes);
 app.use("/api/stats", statRoutes);
 app.use("/api/site-info", siteInfoRoutes);
+app.use("/api/banners", bannerRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
 
 app.use((req, res) => res.status(404).json({ error: "Route not found" }));

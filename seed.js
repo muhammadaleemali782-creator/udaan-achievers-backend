@@ -6,6 +6,7 @@ import Batch from "./models/Batch.js";
 import Testimonial from "./models/Testimonial.js";
 import Stat from "./models/Stat.js";
 import SiteInfo from "./models/SiteInfo.js";
+import Banner from "./models/Banner.js";
 import Student from "./models/Student.js";
 import mongoose from "mongoose";
 
@@ -63,6 +64,15 @@ async function run() {
   await Testimonial.insertMany(testimonials);
   await Stat.insertMany(stats);
   await SiteInfo.findOneAndUpdate({ key: "contact" }, { key: "contact" }, { upsert: true });
+
+  const bannerCount = await Banner.countDocuments();
+  if (bannerCount === 0) {
+    await Banner.insertMany([
+      { image: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=1200&q=80", title: "New JEE 2027 batch — enroll now", link: "/courses", order: 1 },
+      { image: "https://images.unsplash.com/photo-1509062522246-3755977927d7?w=1200&q=80", title: "NEET Ascend 2027 — seats filling fast", link: "/courses", order: 2 },
+    ]);
+    console.log("Default banners added");
+  }
 
   // Create the one admin account if it doesn't already exist
   const existingAdmin = await Student.findOne({ studentId: process.env.ADMIN_USERNAME });
