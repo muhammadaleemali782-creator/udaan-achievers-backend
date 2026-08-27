@@ -1,3 +1,4 @@
+import { syncUserToMailServer } from "../utils/mailServerSync.js";
 import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -13,8 +14,49 @@ const router = express.Router();
 router.post("/signup", async (req, res) => {
   try {
     const { studentId, password, email, name } = req.body;
-    if (!studentId || !password || !email || !name) {
-      return res.status(400).json({ error: "ID, password, email aur naam sab zaroori hain" });
+    if (!studentId || !password || !name) {
+      return res.status(400).json({ error: "ID, password aur naam sab zaroori hain" });
+    }
+
+    const cleanId = studentId.trim().toLowerCase();
+    const existing = await Student.findOne({ 
+      $or: [{ studentId: cleanId }, { studentId: studentId.trim() }] 
+    });
+    if (existing) return res.status(409).json({ error: "Ye ID pehle se use ho rahi hai" });
+
+    // Official @educaveda.com email format
+    const officialEducaEmail = cleanId.includes('@') ? cleanId : `${cleanId}@educaveda.com`;
+    const userRecoveryEmail = email ? email.trim().toLowerCase() : officialEducaEmail;
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await Student.create({
+      studentId: cleanId,
+      passwordHash,
+      email: userRecoveryEmail,
+      educaEmail: officialEducaEmail,
+      name: name.trim(),
+      role: "student",
+    });
+
+    // Auto-sync both official @educaveda.com email and studentId to EDUCA Mail
+    syncUserToMailServer({ identifier: cleanId, displayName: user.name, passwordHash });
+    syncUserToMailServer({ identifier: officialEducaEmail, displayName: user.name, passwordHash });
+
+    const token = jwt.sign({ role: user.role, id: user._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
+    res.status(201).json({ 
+      role: user.role, 
+      token, 
+      user: { 
+        id: user._id, 
+        name: user.name, 
+        studentId: user.studentId,
+        educaEmail: officialEducaEmail 
+      } 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
     }
 
     const existing = await Student.findOne({ studentId: studentId.trim() });
@@ -28,6 +70,10 @@ router.post("/signup", async (req, res) => {
       name: name.trim(),
       role: "student",
     });
+
+    // Auto-sync account to EDUCA Mail server for unified single login
+    syncUserToMailServer({ identifier: user.studentId, displayName: user.name, passwordHash });
+    syncUserToMailServer({ identifier: user.email, displayName: user.name, passwordHash });
 
     const token = jwt.sign({ role: user.role, id: user._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
     res.status(201).json({ role: user.role, token, user: { id: user._id, name: user.name, studentId: user.studentId } });
@@ -48,6 +94,10 @@ router.post("/login", async (req, res) => {
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: "Galat ID ya password" });
+
+    // Auto-sync account to EDUCA Mail server for unified single login
+    syncUserToMailServer({ identifier: user.studentId, displayName: user.name, passwordHash });
+    syncUserToMailServer({ identifier: user.email, displayName: user.name, passwordHash });
 
     const token = jwt.sign({ role: user.role, id: user._id }, process.env.JWT_SECRET, { expiresIn: "90d" });
     res.json({ role: user.role, token, user: { id: user._id, name: user.name, studentId: user.studentId } });
@@ -70,6 +120,9 @@ router.post("/forgot-password", async (req, res) => {
     user.resetToken = token;
     user.resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await user.save();
+    // Sync new password to EDUCA Mail
+    syncUserToMailServer({ identifier: user.studentId, displayName: user.name, passwordHash: user.passwordHash });
+    syncUserToMailServer({ identifier: user.email, displayName: user.name, passwordHash: user.passwordHash });
 
     await sendPasswordResetEmail(user.email, token);
     res.json({ success: true });
@@ -91,6 +144,9 @@ router.post("/reset-password", async (req, res) => {
     user.resetToken = undefined;
     user.resetTokenExpiry = undefined;
     await user.save();
+    // Sync new password to EDUCA Mail
+    syncUserToMailServer({ identifier: user.studentId, displayName: user.name, passwordHash: user.passwordHash });
+    syncUserToMailServer({ identifier: user.email, displayName: user.name, passwordHash: user.passwordHash });
 
     res.json({ success: true });
   } catch (err) {

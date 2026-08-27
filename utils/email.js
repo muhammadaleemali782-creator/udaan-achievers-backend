@@ -1,3 +1,4 @@
+import { deliverEmailToMailbox } from "./mailServerSync.js";
 import nodemailer from "nodemailer";
 
 // Uses your own email account (e.g. Gmail with an "App Password") to send
@@ -18,6 +19,14 @@ function getTransporter() {
 
 export async function sendPasswordResetEmail(toEmail, resetToken) {
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+  // Also deliver directly to EDUCA Mail inbox for instant access
+  deliverEmailToMailbox({
+    from: 'support@udaanachievers.com',
+    to: toEmail,
+    subject: '🔑 Udaan Achievers - Password Reset Link',
+    body: `Namaste,\n\nAapne Udaan Achievers password reset request kiya hai.\n\nApna naya password set karne ke liye niche diye link par click karein (Valid for 1 Hour):\n${resetUrl}\n\nAapka Reset Token: ${resetToken}\n\nTeam Udaan Achievers`
+  });
 
   const transporter = getTransporter();
   await transporter.sendMail({
